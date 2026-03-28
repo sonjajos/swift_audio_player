@@ -98,13 +98,7 @@ struct CircularVisualizerView: View {
     let fftData: FFTData?
     let bandCount: Int
 
-    @StateObject private var model: VisualizerModel
-
-    init(fftData: FFTData?, bandCount: Int = 32) {
-        self.fftData = fftData
-        self.bandCount = bandCount
-        _model = StateObject(wrappedValue: VisualizerModel(bandCount: bandCount))
-    }
+    @StateObject private var model = VisualizerModel(bandCount: 32)
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
@@ -121,7 +115,10 @@ struct CircularVisualizerView: View {
         .onChange(of: bandCount) { newCount in
             model.resize(to: newCount)
         }
-        .onAppear { model.start() }
+        .onAppear {
+            model.resize(to: bandCount)
+            model.start()
+        }
         .onDisappear { model.stop() }
     }
 

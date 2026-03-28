@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AudioPlayerView: View {
-    @EnvironmentObject var store: AppStore
+    @Environment(AppStore.self) var store
     
     var body: some View {
         VStack(spacing: 0) {
@@ -161,7 +161,7 @@ struct ProgressSlider: View {
 
 #Preview {
     AudioPlayerView()
-        .environmentObject({
+        .environment({
             let store = AppStore()
             store.currentTrack = AudioTrack(
                 filePath: "/mock/path.mp3",

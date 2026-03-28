@@ -7,25 +7,27 @@
 
 import Foundation
 import Combine
+import Observation
 
 /// Central state management for the application
 /// Inspired by TCA (The Composable Architecture) pattern
 @MainActor
-class AppStore: ObservableObject {
-    
+@Observable
+class AppStore {
+
     // MARK: - State
-    
-    @Published var tracks: [AudioTrack] = []
-    @Published var bandCount: Int = 32
-    @Published var currentTrack: AudioTrack?
-    @Published var playbackState: PlaybackState = .idle
-    @Published var currentPositionMs: Int = 0
-    @Published var durationMs: Int = 0
-    @Published var fftData: FFTData?
-    @Published var isLoading: Bool = false
-    @Published var error: String?
-    @Published var waveformPeaks: [Float]? = nil
-    @Published var isLoadingWaveform: Bool = false
+
+    var tracks: [AudioTrack] = []
+    var bandCount: Int = 32
+    var currentTrack: AudioTrack?
+    var playbackState: PlaybackState = .idle
+    var currentPositionMs: Int = 0
+    var durationMs: Int = 0
+    var fftData: FFTData?
+    var isLoading: Bool = false
+    var error: String?
+    var waveformPeaks: [Float]? = nil
+    var isLoadingWaveform: Bool = false
 
     // MARK: - Services
 
@@ -36,7 +38,7 @@ class AppStore: ObservableObject {
     private let waveformService = WaveformService()
     private var fileImportService: FileImportService?
     
-    private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var cancellables = Set<AnyCancellable>()
     
     // MARK: - Init
     
@@ -87,21 +89,25 @@ class AppStore: ObservableObject {
     }
     
     private func setupBindings() {
-        // Bind audio player service to app state
         audioPlayerService.$playbackState
-            .assign(to: &$playbackState)
-        
+            .sink { [weak self] in self?.playbackState = $0 }
+            .store(in: &cancellables)
+
         audioPlayerService.$currentPositionMs
-            .assign(to: &$currentPositionMs)
-        
+            .sink { [weak self] in self?.currentPositionMs = $0 }
+            .store(in: &cancellables)
+
         audioPlayerService.$durationMs
-            .assign(to: &$durationMs)
-        
+            .sink { [weak self] in self?.durationMs = $0 }
+            .store(in: &cancellables)
+
         audioPlayerService.$fftData
-            .assign(to: &$fftData)
-        
+            .sink { [weak self] in self?.fftData = $0 }
+            .store(in: &cancellables)
+
         audioPlayerService.$currentTrack
-            .assign(to: &$currentTrack)
+            .sink { [weak self] in self?.currentTrack = $0 }
+            .store(in: &cancellables)
 
         audioPlayerService.onTrackCompleted = { [weak self] in
             self?.playNext()
@@ -270,11 +276,13 @@ class AppStore: ObservableObject {
             durationMs: track.durationMs,
             dateAdded: track.dateAdded
         )
-        do {
-            try audioPlayerService.load(track: resolved)
-            audioPlayerService.play()
-        } catch {
-            self.error = "Failed to play track: \(error.localizedDescription)"
+        Task {
+            do {
+                try await audioPlayerService.load(track: resolved)
+                audioPlayerService.play()
+            } catch {
+                self.error = "Failed to play track: \(error.localizedDescription)"
+            }
         }
 
         // Load waveform in background whenever the track changes

@@ -8,26 +8,23 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var store = AppStore()
+    @State private var store = AppStore()
     @State private var showingFilePicker = false
-    @State private var nowPlayingTrack: AudioTrack? = nil
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 Color.black.ignoresSafeArea()
 
                 // Audio list with mini player pinned below the nav bar
                 AudioListView()
-                    .environmentObject(store)
                     .navigationDestination(for: AudioTrack.self) { track in
                         NowPlayingView(initialTrack: track)
-                            .environmentObject(store)
                     }
                     .safeAreaInset(edge: .top, spacing: 0) {
                         if store.currentTrack != nil {
-                            MiniPlayerBarView(nowPlayingTrack: $nowPlayingTrack)
-                                .environmentObject(store)
+                            MiniPlayerBarView(navigationPath: $navigationPath)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
@@ -59,16 +56,6 @@ struct ContentView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .preferredColorScheme(.dark)
-            // Programmatic navigation from mini bar tap
-            .navigationDestination(isPresented: Binding(
-                get: { nowPlayingTrack != nil },
-                set: { if !$0 { nowPlayingTrack = nil } }
-            )) {
-                if let track = nowPlayingTrack {
-                    NowPlayingView(initialTrack: track)
-                        .environmentObject(store)
-                }
-            }
             .documentPicker(isPresented: $showingFilePicker) { urls in
                 Task {
                     await store.importFiles(urls)
@@ -96,6 +83,7 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.25), value: store.currentTrack != nil)
         }
+        .environment(store)
     }
 }
 

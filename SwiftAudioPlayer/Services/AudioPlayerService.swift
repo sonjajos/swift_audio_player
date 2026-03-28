@@ -53,8 +53,8 @@ class AudioPlayerService: ObservableObject {
     
     // MARK: - Public API
     
-    func load(track: AudioTrack) throws {
-        try engine.load(filePath: track.filePath)
+    func load(track: AudioTrack) async throws {
+        try await engine.load(filePath: track.filePath)
         currentTrack = track
     }
     

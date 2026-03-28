@@ -8,10 +8,9 @@
 import SwiftUI
 
 struct MiniPlayerBarView: View {
-    @EnvironmentObject var store: AppStore
+    @Environment(AppStore.self) var store
 
-    // Drives navigation to NowPlayingView on tap
-    @Binding var nowPlayingTrack: AudioTrack?
+    @Binding var navigationPath: NavigationPath
 
     var body: some View {
         if let track = store.currentTrack {
@@ -67,7 +66,7 @@ struct MiniPlayerBarView: View {
             .background(Color(white: 0.1))
             .contentShape(Rectangle())
             .onTapGesture {
-                nowPlayingTrack = track
+                navigationPath.append(track)
             }
         }
     }

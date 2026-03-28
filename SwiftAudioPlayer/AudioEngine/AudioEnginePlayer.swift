@@ -116,10 +116,10 @@ class AudioEnginePlayer {
     
     // MARK: - Public API
     
-    func load(filePath: String) throws {
+    func load(filePath: String) async throws {
         // Invalidate any pending completion callbacks from the previous track
         loadGeneration += 1
-        
+
         // Stop current playback and engine before loading a new track
         playerNode.stop()
         stopPositionTimer()
@@ -128,7 +128,7 @@ class AudioEnginePlayer {
         if engine.isRunning {
             engine.stop()
         }
-        
+
         // Handle both file:// URIs and plain paths
         let url: URL
         if filePath.hasPrefix("file://") {
@@ -141,27 +141,29 @@ class AudioEnginePlayer {
         } else {
             url = URL(fileURLWithPath: filePath)
         }
-        
-        audioFile = try AVAudioFile(forReading: url)
-        
-        guard let file = audioFile else { return }
-        
+
+        // AVAudioFile(forReading:) does I/O and codec init — run off main thread
+        let file = try await Task.detached(priority: .userInitiated) {
+            try AVAudioFile(forReading: url)
+        }.value
+
+        audioFile = file
         fileSampleRate = file.processingFormat.sampleRate
         fileTotalFrames = file.length
         fileDurationMs = Int(Double(fileTotalFrames) / fileSampleRate * 1000.0)
         seekFrameOffset = 0
         playbackState = .idle
-        
+
         // Connect nodes with the file's format
         connectNodes(format: file.processingFormat)
-        
+
         // Install tap for FFT / PCM data
         installTap(format: file.processingFormat)
-        
+
         // Prepare and start engine
         engine.prepare()
         try engine.start()
-        
+
         notifyState()
     }
     

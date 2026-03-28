@@ -135,12 +135,12 @@ Or simply open `SwiftAudioPlayer.xcodeproj` in Xcode, select an iOS simulator, a
 │                                                     │
 │  ┌──────────────┐  ┌──────────────────────────────┐ │
 │  │    Views     │  │         AppStore             │ │
-│  │ AudioListView│  │  @MainActor ObservableObject │ │
-│  │NowPlayingView│  │  @Published state properties │ │
+│  │ AudioListView│  │  @MainActor @Observable      │ │
+│  │NowPlayingView│  │  var state properties        │ │
 │  │MiniPlayerBar │  │  Action methods              │ │
 │  └──────┬───────┘  └──────────────┬───────────────┘ │
-│         │  @EnvironmentObject     │                 │
-│  ┌──────▼─────────────────────────│ Combine .assign │
+│         │  @Environment           │                 │
+│  ┌──────▼─────────────────────────│ Combine .sink   │
 │  │       VisualizerModel          │                 │
 │  │  CADisplayLink-driven smoothing│                 │
 │  └────────────────────────────────┘                 │
@@ -230,24 +230,26 @@ SwiftAudioPlayer/
 
 ### AppStore (State Management)
 
-`AppStore` is a `@MainActor`-isolated `ObservableObject` that serves as the single source of truth for all application state. It is passed into the SwiftUI view hierarchy via `.environmentObject()` from `ContentView`.
+`AppStore` is a `@MainActor`-isolated `@Observable` class that serves as the single source of truth for all application state. It is passed into the SwiftUI view hierarchy via `.environment()` from `ContentView`.
 
 This mirrors the Riverpod `StateNotifier` pattern used in the Flutter implementation — all state mutations go through `AppStore` action methods, never directly from views.
 
-**Published State:**
+Using `@Observable` (Swift Observation framework, iOS 17+) instead of `ObservableObject` means SwiftUI tracks only the specific properties accessed during each view's `body` evaluation. Views that do not read `fftData` (e.g. `AudioListView`) are not invalidated by the 60fps FFT updates.
+
+**State:**
 
 ```swift
-@Published var tracks: [AudioTrack]       // All imported audio files
-@Published var currentTrack: AudioTrack?  // Currently loaded track
-@Published var playbackState: PlaybackState // idle / playing / paused / stopped
-@Published var currentPositionMs: Int     // Playback position in milliseconds
-@Published var durationMs: Int            // Track duration in milliseconds
-@Published var fftData: FFTData?          // Latest FFT band data from the engine
-@Published var bandCount: Int             // Active FFT band count (16/32/64/128)
-@Published var waveformPeaks: [Float]?    // 300-point normalized RMS waveform
-@Published var isLoading: Bool            // File import in progress
-@Published var isLoadingWaveform: Bool    // Waveform computation in progress
-@Published var error: String?             // Last error message for alert display
+var tracks: [AudioTrack]          // All imported audio files
+var currentTrack: AudioTrack?     // Currently loaded track
+var playbackState: PlaybackState  // idle / playing / paused / stopped
+var currentPositionMs: Int        // Playback position in milliseconds
+var durationMs: Int               // Track duration in milliseconds
+var fftData: FFTData?             // Latest FFT band data from the engine
+var bandCount: Int                // Active FFT band count (16/32/64/128)
+var waveformPeaks: [Float]?       // 300-point normalized RMS waveform
+var isLoading: Bool               // File import in progress
+var isLoadingWaveform: Bool       // Waveform computation in progress
+var error: String?                // Last error message for alert display
 ```
 
 **Key Action Methods:**
@@ -265,14 +267,14 @@ func loadTracks() async                   // Reload all tracks from SQLite
 
 **Combine Bindings:**
 
-`AppStore.setupBindings()` uses `.assign(to:)` to pipe `AudioPlayerService`'s `@Published` properties directly into `AppStore`'s corresponding properties, so views only need to observe `AppStore`:
+`AppStore.setupBindings()` uses `.sink` to pipe `AudioPlayerService`'s `@Published` properties into `AppStore`'s corresponding properties. `.assign(to: &$)` is unavailable on `@Observable` types (which have no `@Published` wrapper), so `.sink` with explicit assignment is used instead:
 
 ```swift
-audioPlayerService.$playbackState  →  $playbackState
-audioPlayerService.$currentPositionMs  →  $currentPositionMs
-audioPlayerService.$durationMs  →  $durationMs
-audioPlayerService.$fftData  →  $fftData
-audioPlayerService.$currentTrack  →  $currentTrack
+audioPlayerService.$playbackState    .sink → playbackState
+audioPlayerService.$currentPositionMs.sink → currentPositionMs
+audioPlayerService.$durationMs       .sink → durationMs
+audioPlayerService.$fftData          .sink → fftData
+audioPlayerService.$currentTrack     .sink → currentTrack
 ```
 
 ---
@@ -287,7 +289,7 @@ A `@MainActor ObservableObject` that wraps `AudioEnginePlayer` and exposes a Com
 
 ```swift
 // Playback control
-func load(track: AudioTrack) throws
+func load(track: AudioTrack) async throws  // AVAudioFile init runs off main thread
 func play(), pause(), resume(), stop()
 func seek(to positionMs: Int)
 func setBandCount(_ count: Int)
@@ -495,7 +497,8 @@ Core playback engine built on `AVAudioEngine` + `AVAudioPlayerNode`.
 
 **Playback:**
 
-- Files loaded with `AVAudioFile`, scheduled via `playerNode.scheduleSegment()`
+- Files loaded with `AVAudioFile` via `async throws load()` — `AVAudioFile(forReading:)` runs on a `Task.detached` background thread to avoid blocking the main thread during codec initialization (eliminates 500–900ms hangs on track change)
+- Scheduled via `playerNode.scheduleSegment()`
 - Seek: stops player, updates `seekFrameOffset`, reschedules from new position
 - Position tracked via `playerNode.playerTime(forNodeTime:)` + `seekFrameOffset`
 - `DispatchSourceTimer` on a utility queue fires every 100ms to emit position updates via `onStateChanged`

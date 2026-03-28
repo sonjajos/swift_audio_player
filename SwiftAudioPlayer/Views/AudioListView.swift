@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AudioListView: View {
-    @EnvironmentObject var store: AppStore
+    @Environment(AppStore.self) var store
 
     var body: some View {
         ZStack {
@@ -98,7 +98,7 @@ struct AudioTrackRow: View {
         ZStack {
             Color.black.ignoresSafeArea()
             AudioListView()
-                .environmentObject({
+                .environment({
                     let store = AppStore()
                     // Mock data for preview
                     store.tracks = [

@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct NowPlayingView: View {
-    @EnvironmentObject var store: AppStore
+    @Environment(AppStore.self) var store
     let initialTrack: AudioTrack
 
     private static let bandCounts = [16, 32, 64, 128]
@@ -113,7 +113,6 @@ struct NowPlayingView: View {
             if store.currentTrack?.id != initialTrack.id {
                 store.playTrack(initialTrack)
             }
-            store.setBandCount(store.bandCount)
         }
     }
 
@@ -133,7 +132,7 @@ struct NowPlayingView: View {
             artist: "Unknown Artist",
             durationMs: 184000
         ))
-        .environmentObject({
+        .environment({
             let store = AppStore()
             store.playbackState = .playing
             return store
