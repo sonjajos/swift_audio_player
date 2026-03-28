@@ -1,7 +1,26 @@
 # Swift Audio Player
 
-An iOS audio player built natively with Swift and SwiftUI, featuring real-time FFT audio visualization and waveform display. This project is part of a master thesis comparing performance characteristics between Flutter, React Native, and native Swift implementations of an equivalent audio player application. The app is currently runnable on **iOS only**.
+An iOS audio player built natively with Swift and SwiftUI, featuring real-time FFT audio visualization and waveform display. This project is part of a master thesis comparing performance characteristics between Flutter, React Native, and native Swift implementations of an equivalent audio player application.
 
+<table>
+  <tr>
+    <td>
+      <img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2026-03-28 at 17 29 00" src="https://github.com/user-attachments/assets/5d25e862-c0c0-43d5-8c47-265cc09dccd4" />
+    </td>
+    <td>
+      <img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2026-03-28 at 17 29 27" src="https://github.com/user-attachments/assets/476ac9b6-1122-4309-b387-6abe1ebbeb6f" />
+    </td>
+    <td>
+      <img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2026-03-28 at 17 29 32" src="https://github.com/user-attachments/assets/2f0c0876-41ed-4f75-8132-ae76a5475015" />
+    </td>
+    <td>
+      <img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2026-03-28 at 17 29 38" src="https://github.com/user-attachments/assets/56cc68ae-bb2d-40a9-8222-9c47dd14e380" />
+    </td>
+    <td>
+      <img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2026-03-28 at 17 29 45" src="https://github.com/user-attachments/assets/db39261f-8b00-48bb-a8fd-294ab1284fb2" />
+    </td>
+  </tr>
+</table>
 ---
 
 ## Table of Contents
