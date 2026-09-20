@@ -36,6 +36,7 @@ An iOS audio player built natively with Swift and SwiftUI, featuring real-time F
   - [Services](#services)
   - [Views & Navigation](#views--navigation)
   - [Audio Visualizer](#audio-visualizer)
+  - [Metal (GPU) Visualizer Renderer](#metal-gpu-visualizer-renderer)
   - [Waveform Seeker](#waveform-seeker)
   - [AudioEnginePlayer](#audioengineplayerswift)
   - [Waveform C++ Module](#waveform-c-module)
@@ -79,6 +80,7 @@ This project has zero third-party Swift packages. All functionality is implement
 | `Combine`      | Reactive state binding                            |
 | `SQLite3`      | Local metadata persistence (raw C API)            |
 | `QuartzCore`   | `CADisplayLink` for frame-synced animation        |
+| `MetalKit`     | GPU-rendered circular visualizer (`MTKView`)      |
 
 ---
 
@@ -113,7 +115,7 @@ Or simply open `SwiftAudioPlayer.xcodeproj` in Xcode, select an iOS simulator, a
 
 4. **Playback controls** — Play, pause, resume, skip to next, or go to previous track. Controls are available both on the full-screen player and the mini player bar.
 
-5. **Real-time visualization** — View a circular audio visualizer that reacts to the audio frequency spectrum in real time using FFT analysis.
+5. **Real-time visualization** — View a circular audio visualizer that reacts to the audio frequency spectrum in real time using FFT analysis, rendered on the GPU via Metal.
 
 6. **Waveform navigation** — View a waveform representation of the current track with a progress indicator showing elapsed and remaining time.
 
@@ -143,7 +145,13 @@ Or simply open `SwiftAudioPlayer.xcodeproj` in Xcode, select an iOS simulator, a
 │  ┌──────▼─────────────────────────│ Combine .sink   │
 │  │       VisualizerModel          │                 │
 │  │  CADisplayLink-driven smoothing│                 │
-│  └────────────────────────────────┘                 │
+│  └──────────────┬─────────────────┘                 │
+│                 │  renders via                      │
+│        ┌────────┴────────┐                          │
+│        ▼                 ▼                          │
+│  MetalCircular-    CPUCircular-                      │
+│  VisualizerView    VisualizerView                    │
+│  (MTKView, GPU)    (Canvas, CPU)                     │
 └────────────────────────────────┬────────────────────┘
                                  │
               ┌──────────────────▼──────────────────┐
@@ -191,6 +199,9 @@ SwiftAudioPlayer/
     │   ├── WaveformCppBridge.mm      # Obj-C++ unity build (includes C++ impl inline)
     │   └── waveform_peaks.h          # C extern declaration for the RMS algorithm
     │
+    ├── Metal/
+    │   └── CircularVisualizer.metal  # Vertex/fragment shaders for the GPU visualizer
+    │
     ├── Models/
     │   ├── AudioTrack.swift          # AudioTrack struct (Identifiable, Codable, Hashable)
     │   ├── FFTData.swift             # FFTData struct (bands, nativeFftTimeUs)
@@ -211,13 +222,16 @@ SwiftAudioPlayer/
     │   ├── AudioListView.swift       # Track list with swipe-to-delete, NavigationLink
     │   ├── NowPlayingView.swift      # Full-screen player: visualizer, waveform, controls
     │   ├── MiniPlayerBarView.swift   # Compact player bar pinned below nav bar
-    │   ├── CircularVisualizerView.swift # CADisplayLink-driven circular FFT visualizer
+    │   ├── CircularVisualizerView.swift    # Router: picks Metal (GPU) or CPU renderer
+    │   ├── MetalCircularVisualizerView.swift # MTKView-backed GPU circular visualizer
+    │   ├── CPUCircularVisualizerView.swift # SwiftUI Canvas (Core Graphics) visualizer + VisualizerModel
     │   ├── WaveformSeekerView.swift  # Static waveform with frozen-on-pause progress
     │   ├── DocumentPicker.swift      # UIDocumentPickerViewController SwiftUI wrapper
     │   └── FFTVisualizerView.swift   # Bar-graph FFT visualizer (alternative, unused in UI)
     │
     ├── Utilities/
-    │   └── Utilities.swift           # Int.formattedTime, Array<Float>.normalized, etc.
+    │   ├── Utilities.swift           # Int.formattedTime, Array<Float>.normalized, etc.
+    │   └── Constants.swift           # BandCount.default, VisualizerRenderer.useMetal
     │
     ├── SwiftAudioPlayer-Bridging-Header.h  # Imports WaveformCppBridge.h into Swift
     │
@@ -428,23 +442,38 @@ Tapping anywhere sets `nowPlayingTrack` in `ContentView`, triggering programmati
 
 ### Audio Visualizer
 
-`CircularVisualizerView` renders a rotating circular FFT visualizer using SwiftUI's `Canvas` API with `rendersAsynchronously: true`.
+`CircularVisualizerView` is a thin router that switches between two interchangeable renderers of the same circular FFT visualizer, based on the `VisualizerRenderer.useMetal` flag in `Constants.swift`:
 
-#### Architecture
+```swift
+struct CircularVisualizerView: View {
+    var body: some View {
+        if VisualizerRenderer.useMetal {
+            MetalCircularVisualizerView(fftData: fftData, bandCount: bandCount)  // GPU
+        } else {
+            CPUCircularVisualizerView(fftData: fftData, bandCount: bandCount)    // CPU
+        }
+    }
+}
+```
 
-A `VisualizerModel: ObservableObject` owns all mutable state and drives animation via `CADisplayLink` — matching Flutter's `AnimationController` tick pattern:
+Both renderers share the same `VisualizerModel` smoothing/rotation logic and produce pixel-equivalent output — the flag exists to A/B the two rendering strategies for the thesis's performance comparison (matching the Flutter/React Native equivalents being benchmarked against).
+
+#### Shared Model
+
+`VisualizerModel: ObservableObject` (defined in `CPUCircularVisualizerView.swift`, imported by the Metal renderer) owns all mutable state and drives animation via `CADisplayLink` — matching Flutter's `AnimationController` tick pattern:
 
 ```swift
 class VisualizerModel: ObservableObject {
     @Published private(set) var bands: [Float]      // smoothed band values
     @Published private(set) var rotationFraction: Double  // 0...1, 12s period
-    private(set) var colors: [Color]                // pre-computed, never re-allocated
+    private(set) var colors: [Color]                // CPU renderer: pre-computed SwiftUI colors
+    // computeRawColors(bandCount:) also provides SIMD4<Float> RGBA for the GPU renderer
 }
 ```
 
 #### Geometry
 
-`2 × bandCount` bars arranged in a full circle:
+`2 × bandCount` bars arranged in a full circle, identical on both renderers:
 
 - Right half: bands 0 to N-1 (angle step = π / (N-1))
 - Left half: mirrored bands, same amplitudes
@@ -465,12 +494,48 @@ for i in 0..<bandCount {
 }
 ```
 
-#### Performance Optimizations
+#### `CPUCircularVisualizerView` (SwiftUI Canvas)
+
+Renders using SwiftUI's `Canvas` API with `rendersAsynchronously: true`. Equivalent to the Flutter `CustomPainter` implementation.
 
 - **Pre-computed colors**: The `[Color]` array is computed once at init and on band count change — never allocated per frame. Eliminates ~30,000 `Color` object allocations per second at 128 bands.
 - **In-place band mutation**: `bands` is mutated directly without creating a copy, eliminating 60 CoW allocations/second.
 - **`rendersAsynchronously: true`**: Canvas rendering is offloaded from the main thread.
 - **`CADisplayLink`** drives animation instead of `TimelineView`, giving frame-synchronized 60fps updates directly on the main run loop.
+
+---
+
+### Metal (GPU) Visualizer Renderer
+
+`MetalCircularVisualizerView` (a `UIViewRepresentable` wrapping `MTKView`) renders the same visualizer entirely on the GPU, replacing per-frame Core Graphics path drawing with a single indexed draw call.
+
+#### Per-Frame CPU Work
+
+- One `memcpy` of `bandCount` floats into a shared `MTLBuffer` (~64–256 bytes, < 1 µs)
+- One small uniforms buffer write (band count, inner radius, max/min bar length, bar half-width, rotation)
+- One `MTLCommandBuffer` encode + commit
+
+All bar geometry (positions per vertex) and per-band coloring are computed on the GPU in the vertex shader — the CPU never builds `Path` objects or iterates bars.
+
+#### Shaders (`Metal/CircularVisualizer.metal`)
+
+```
+visualizer_vertex(vid, bands[], colors[], uniforms[6])
+  - Each bar = 2 triangles = 6 vertices (vid / 6 → bar index)
+  - Reconstructs the same angle/geometry math as the CPU renderer
+    (angleStep = π / (bandCount − 1), mirrored left/right halves)
+  - Emits 4 rectangle corners per bar directly in NDC space
+
+visualizer_fragment(in)
+  - Flat-shaded passthrough of the vertex color — no per-pixel work
+```
+
+#### `MetalVisualizerCoordinator` (`MTKViewDelegate`)
+
+- Owns the `MTLDevice`, `MTLCommandQueue`, `MTLRenderPipelineState`, and three `MTLBuffer`s (`bandsBuffer`, `colorsBuffer`, `uniformsBuffer`), all pre-sized for the max supported band count (256) so band-count changes never trigger a reallocation
+- `drawableSizeWillChange` recomputes NDC-space geometry constants (inner radius, bar length, bar width) whenever the view resizes
+- Alpha blending is enabled on the color attachment so the visualizer composites correctly over the black background
+- Shares the exact same `VisualizerModel` instance pattern (smoothing, rotation, resize) as the CPU renderer — only the draw call differs
 
 ---
 
@@ -624,20 +689,24 @@ AudioPlayerService  →  @Published fftData: FFTData
         ▼  Combine .assign(to:)
 AppStore.$fftData
         │
-        ▼  .onChange(of: fftData) in CircularVisualizerView
+        ▼  .onChange(of: fftData) in CPU/MetalCircularVisualizerView
 VisualizerModel.updateTarget(bands)  — writes into targetBands[]
         │
         ▼  CADisplayLink tick (60fps, main thread)
   - Lerp: bands[i] += (targetBands[i] - bands[i]) * 0.3  (in-place, no allocation)
   - rotationFraction += dt / 12.0
         │
-        ▼  @Published bands change → Canvas redraw
-SwiftUI Canvas
-  - Draw 2×bandCount radial bars with pre-computed HSL color array
-  - rendersAsynchronously: true
+        ▼  @Published bands change → redraw (renderer set by VisualizerRenderer.useMetal)
+   ┌───────────────────────────┬───────────────────────────────┐
+   │ CPU: SwiftUI Canvas       │ GPU: MTKView (Metal)           │
+   │ - Draw 2×bandCount radial │ - memcpy bands → MTLBuffer     │
+   │   bars, pre-computed HSL  │ - 1 draw call, geometry/color  │
+   │   color array             │   computed in vertex shader    │
+   │ - rendersAsynchronously   │ - MTKViewDelegate.draw(in:)    │
+   └───────────────────────────┴───────────────────────────────┘
 ```
 
-Key design insight: FFT values arrive at audio tap rate (~60+ Hz) but the Canvas only redraws at `CADisplayLink` rate (60fps). The `updateTarget` → lerp → paint pipeline decouples data production from rendering, identical to Flutter's `AnimationController` tick pattern.
+Key design insight: FFT values arrive at audio tap rate (~60+ Hz) but each renderer only redraws at `CADisplayLink` rate (60fps). The `updateTarget` → lerp → paint pipeline decouples data production from rendering, identical to Flutter's `AnimationController` tick pattern, and is shared verbatim between the CPU and GPU renderers.
 
 ---
 

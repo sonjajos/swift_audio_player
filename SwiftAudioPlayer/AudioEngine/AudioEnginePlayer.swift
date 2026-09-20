@@ -37,7 +37,7 @@ class AudioEnginePlayer {
     
     // MARK: - FFT Configuration
     
-    private var bandCount: Int = 32
+    private var bandCount: Int = BandCount.default
     private let fftSize: Int = 4096
     private var fftSetup: FFTSetup?
     private var log2n: vDSP_Length = 0

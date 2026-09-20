@@ -18,7 +18,7 @@ class AppStore {
     // MARK: - State
 
     var tracks: [AudioTrack] = []
-    var bandCount: Int = 32
+    var bandCount: Int = BandCount.default
     var currentTrack: AudioTrack?
     var playbackState: PlaybackState = .idle
     var currentPositionMs: Int = 0
@@ -286,15 +286,18 @@ class AppStore {
         }
 
         // Load waveform in background whenever the track changes
-        loadWaveform(absolutePath: absolutePath)
+        loadWaveform(absolutePath: absolutePath, trackTitle: track.title)
     }
 
-    private func loadWaveform(absolutePath: String) {
+    private func loadWaveform(absolutePath: String, trackTitle: String) {
         waveformPeaks = nil
         isLoadingWaveform = true
         Task {
+            let start = Date()
             do {
                 let peaks = try await waveformService.generatePeaks(absolutePath: absolutePath)
+                let elapsed = Date().timeIntervalSince(start)
+                print("🎵 \(trackTitle): \(String(format: "%.2fs", elapsed))")
                 waveformPeaks = peaks
             } catch {
                 print("Waveform generation failed: \(error)")
